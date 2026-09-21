@@ -12,3 +12,6 @@ venv/
 
 # Docker
 *.log
+
+# Database content
+database/
