@@ -7,6 +7,42 @@ import hashlib
 import re
 from dotenv import load_dotenv
 
+env = Path(__file__).resolve().parent / ".env"
+load_dotenv(env)
+
+CACHE_FILE = Path(os.getenv("MARKDOWN_CONVERSION_FOLDER")) / "FILE_HASHES.json"
+print(CACHE_FILE)
+
+# Create the Cache File if it doesn't exist
+if not CACHE_FILE.exists():
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        # Write an empty dictionary so that json.load() doesn't fail later
+        json.dump({}, f)
+    print(f"Initialized new cache file at: {CACHE_FILE}")
+else:
+    print(f"Using existing cache file at: {CACHE_FILE}")
+
+# Loads the cache json file
+def load_hash_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            print("There was an error finding the cache file.")
+            return {}
+    return {}
+
+# Load pre-exisiting hashes
+hash_cache = load_hash_cache()
+existing_hashes = set(hash_cache.values()) # Adds pre-exisiting hashes to shorten time and computational resources
+
+# Saves the content to the json file
+def save_hash_cache(cache):
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, indent=4)
+
+
 # Creates a name for a JSON note utilizing AI model
 def generate_name(note):
     clean_note = {
@@ -17,6 +53,12 @@ def generate_name(note):
     }
     # print(clean_note)
 
+    # Check for duplicate content (regardless of name)
+    new_content_hash = get_content_hash(clean_note['text'])
+    if new_content_hash in existing_hashes:
+        print(f"Skipped: A note with this exact content already exists (regardless of name).")
+        return False
+    
     # Prompt to send to the model
     prompt = f"""
     Generate a short descriptive title for this note.
@@ -80,7 +122,7 @@ def save_note_if_unique(new_name, content, target_directory):
 
     # Prepare Hashing
     new_content_hash = get_content_hash(content)
-    existing_hashes = set()
+    #existing_hashes = set(hash_cache.values()) # Adds pre-exisiting hashes to shorten time and computational resources
     existing_filenames = set()
 
     # Scan exisiting files
@@ -131,9 +173,6 @@ def save_note_if_unique(new_name, content, target_directory):
     return True
 
 
-env = Path(__file__).resolve().parent / ".env"
-load_dotenv(env)
-
 
 # Main loop
 i = 0
@@ -145,9 +184,9 @@ for note in keep_notes_folder.glob("*.json"):
         print(new_filename)
         save_note_if_unique(new_filename, note["textContent"], os.getenv("MARKDOWN_CONVERSION_FOLDER"))
     # print(note)
-    i += 1
-    if i >= 10: # Limits the run to 10 notes
-        break
+    #i += 1
+    #if i >= 10: # Limits the run to 10 notes
+    #    break
     
 
 
