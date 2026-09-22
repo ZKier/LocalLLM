@@ -45,19 +45,40 @@ def save_hash_cache(cache):
 
 # Creates a name for a JSON note utilizing AI model
 def generate_name(note):
-    clean_note = {
-            "title": note["title"],
-            "text": note["textContent"],
-            "created": note["createdTimestampUsec"],
-            "modified": note["userEditedTimestampUsec"]
-    }
+    clean_note = {}
+    try:
+        clean_note = {
+                "title": note["title"],
+                "text": note["textContent"],
+                "created": note["createdTimestampUsec"],
+                "modified": note["userEditedTimestampUsec"]
+        }
+    except Exception:
+        print(Exception)
+        try:
+            # Handle the case where there is a list instead of text
+            clean_note = {
+                            "title": note["title"],
+                            "text": note["listContent"],
+                            "created": note["createdTimestampUsec"],
+                            "modified": note["userEditedTimestampUsec"]
+            }
+        except Exception:
+            print(Exception)            
     # print(clean_note)
+    
 
     # Check for duplicate content (regardless of name)
-    new_content_hash = get_content_hash(clean_note['text'])
+    # Convert list data to string data
+    if isinstance(clean_note['text'], list):
+        clean_note_list_as_string = "\n".join(map(str, clean_note['text'])) # Convert ['a', 'b'] -> "a\nb" (joins with newlines)
+        new_content_hash = get_content_hash(clean_note_list_as_string)
+    else:
+        new_content_hash = get_content_hash(clean_note['text'])
     if new_content_hash in existing_hashes:
-        print(f"Skipped: A note with this exact content already exists (regardless of name).")
+        print(f"Skipped: A note with this exact content already exists (regardless of name)(0).")
         return False
+        #return {}
     
     # Prompt to send to the model
     prompt = f"""
@@ -121,7 +142,12 @@ def save_note_if_unique(new_name, content, target_directory):
                 print("Please enter a valid answer!")
 
     # Prepare Hashing
-    new_content_hash = get_content_hash(content)
+    # Convert list data to string data
+    if isinstance(content, list):
+        content = "\n".join(map(str, content)) # Convert ['a', 'b'] -> "a\nb" (joins with newlines)
+        new_content_hash = get_content_hash(content)
+    else:
+        new_content_hash = get_content_hash(content)
     #existing_hashes = set(hash_cache.values()) # Adds pre-exisiting hashes to shorten time and computational resources
     existing_filenames = set()
 
@@ -140,9 +166,8 @@ def save_note_if_unique(new_name, content, target_directory):
                 pass # Skip unreadable files
 
     # Check for duplicate content (regardless of name)
-    new_content_hash = get_content_hash(content)
     if new_content_hash in existing_hashes:
-        print(f"Skipped: A note with this exact content already exists (regardless of name).")
+        print(f"Skipped: A note with this exact content already exists (regardless of name) (1).")
         return False
 
     new_name_string = str(new_name)
@@ -179,10 +204,21 @@ i = 0
 keep_notes_folder = Path(os.getenv("GOOGLE_KEEP_NOTES"))
 for note in keep_notes_folder.glob("*.json"):
     with open(note, "r", encoding="utf-8") as file:
-        note = json.load(file)
-        new_filename = generate_name(note)
+        json_note = json.load(file)
+        print("file: ", file.name)
+        new_filename = generate_name(json_note)
         print(new_filename)
-        save_note_if_unique(new_filename, note["textContent"], os.getenv("MARKDOWN_CONVERSION_FOLDER"))
+
+        try:
+            json_note["textContent"]
+            save_note_if_unique(new_filename, json_note["textContent"], os.getenv("MARKDOWN_CONVERSION_FOLDER"))
+        except Exception:
+            print(Exception)
+            # Handle the case where there is a list instead of text
+            json_note["listContent"]
+            save_note_if_unique(new_filename, json_note["listContent"], os.getenv("MARKDOWN_CONVERSION_FOLDER"))
+
+        
     # print(note)
     #i += 1
     #if i >= 10: # Limits the run to 10 notes
