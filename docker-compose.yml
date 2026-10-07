@@ -7,7 +7,7 @@ services:
       - ./api:/app
 
   database:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg18
     container_name: postgres_server
     restart: unless-stopped
     environment:
@@ -17,4 +17,4 @@ services:
     ports:
       - "5433:5432" # Left Port changed to 5433 to prevent port conflicts between other server
     volumes:
-      - ./database:/var/lib/postgresql/data
+      - ./database:/var/lib/postgresql
