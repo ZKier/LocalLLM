@@ -16,6 +16,7 @@ from nltk.tokenize import sent_tokenize
 import requests
 import os
 from transformers import AutoTokenizer
+import json
 
 # Calculate 1/16th of the max context window
 GEMMA3_CONTEXT_WINDOW = 131072
@@ -69,77 +70,131 @@ def blocks_within_token_limit(
     max_tokens: int
 ) -> list[str]:
 
-    selected = []
+    batches = []
+    current_batch = []
 
     for block in blocks:
-        candidate = selected + [block]
+        candidate = current_batch + [block]
 
         if token_count(candidate) > max_tokens:
-            break
+            if current_batch:
+                batches.append(current_batch)
 
-        selected.append(block)
+            current_batch = [block]
+        else:
+            current_batch.append(block)
 
-    return selected
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
 
 # Function: Utilize AI to make decisions about how large the chunks should be
 def determine_chunk_sizing(file):
     text = file.read_text(encoding="utf-8") # Converts the markdown into a string
 
-    # Tokenize it
-
-
     data = preprocess(text) # Converts the string into a list
     number_of_blocks = number_blocks(data) # Numbers the strings in the list
 
-    # Calculate how much data in the list can be read.
+    # Returns batches of data from the file that are max length of 1/16th context window
     calculated_data = blocks_within_token_limit(number_of_blocks, SIXTEENTH_CONTEXT_WINDOW) # it needs to be looped and updated...
 
-    #print(number_of_blocks)
+    print("lenth of calculated data:", len(calculated_data))
+    print(number_of_blocks)
     #print(calculated_data)
-    # Prompt to send to the model
-    prompt = f"""
-    Group the numbered Markdown blocks below into semantically coherent chunks.
+    chunks = []
+    for iteration_of_data in calculated_data:
+        # Prompt to send to the model
+        prompt = f"""
+        Group the numbered Markdown blocks below into semantically coherent chunks.
 
-    Rules:
-    - Return only valid JSON.
-    - Refer to blocks only by their numeric IDs.
-    - Every block must belong to exactly one chunk.
-    - Blocks must remain in their original order.
-    - A chunk may contain only consecutive blocks.
-    - Prefer existing Markdown heading boundaries.
-    - Do not reproduce the source text.
-    - Do not omit any blocks.
+        Rules:
+        - Return only valid JSON.
+        - Refer to blocks only by their numeric IDs.
+        - Every block must belong to exactly one chunk.
+        - Blocks must remain in their original order.
+        - A chunk may contain only consecutive blocks.
+        - Prefer existing Markdown heading boundaries.
+        - Do not reproduce the source text.
+        - Do not omit any blocks.
 
-    Return:
+        - Prefer larger, context-rich chunks. 
+        - Do not create a new chunk merely because a paragraph introduces a slightly different point. 
+        - Keep related arguments, examples, explanations, reflections, and supporting details together. 
+        - Create a boundary only when the text meaningfully transitions to a new topic or independent thought.
 
-    {{
-    "chunks": [
+        Return:
+
         {{
-        "start_block": 0,
-        "end_block": 3,
-        "topic": "Short topic description"
+        "chunks": [
+            {{
+            "start_block": 0,
+            "end_block": 3,
+            "topic": "Short topic description"
+            }}
+        ]
         }}
-    ]
-    }}
 
-    BLOCKS:
-    {calculated_data}
-    """
-    # Makes a request to the ollama localhost.
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": "gemma3:4b",
-            "prompt": prompt,
-            "stream": False # Ollama waits until the entire response is finished before sending back the JSON Object
-        }
-    )
+        BLOCKS:
+        {iteration_of_data}
+        """
+        # Makes a request to the ollama localhost.
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "gemma3:4b",
+                "prompt": prompt,
+                "stream": False # Ollama waits until the entire response is finished before sending back the JSON Object
+            }
+        )
+        '''
+        # Remove Markdown code fences
+        response = response.json()
 
-    result = response.json()
+        if response.startswith("```json"):
+            response = response[7:]
+        elif response.startswith("```"):
+            response = response[3:]
 
+        if response.endswith("```"):
+            response = response[:-3]
+
+        # Convert JSON string to Python dictionary
+        response = json.loads(response.strip())
+        '''
+        result = response.json()
+        response = result["response"]
+        # Remove Markdown code fences
+        response = response.strip()
+        response = response.removeprefix("```json")
+        response = response.removesuffix("```")
+
+        # Convert JSON string into dictionary
+        try:
+            parsed = json.loads(response.strip())
+
+        except json.JSONDecodeError as e:
+            print(f"JSON Error: {e}")
+            print(f"Line: {e.lineno}, Column: {e.colno}")
+
+            print("Problematic section:")
+            print(repr(response[max(0, e.pos - 100):e.pos + 100]))
+
+            raise
+
+        # Add chunks to your list
+        chunks.extend(parsed["chunks"]) 
+
+        # Add the chunks to your list
+        #chunks.extend(response["chunks"])
+        #result = response.json()
+        #print(result)
+        #chunks += result["response"].json()
+    
     print(result["response"])
-
-    return result["response"]
+    print(chunks)
+    return chunks
+    #return (result["response"])
 
 # The input data (Should be the converted markdown data)
 markdown_conversions = Path(os.getenv("MARKDOWN_CONVERSION_FOLDER"))
